@@ -1,0 +1,405 @@
+---
+title: "Analysis of Kaggle Survey "
+author: "Jennifer La"
+date: "December 4, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Dataset Details
+The data set was created from information collected from a Kaggle survey to examine the state of data science and machine learning from the views of more than 16000 individuals from over 171 different countries. The question bank consisted of approximately 200 questions, some questions were asked to all individuals while others were only asked to particular groups of people. Individuals were grouped into 'learners', 'non-switcher', 'non-worker', 'worker', and 'coding worker' based on their answers to current employment state, if they code for their job, if they are learning to code, and if they are looking to switch careers. 
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(plotly)
+library(stringr)
+library(sampling)
+library(wordcloud)
+#read in whole dataset
+data <- read.csv('multipleChoiceResponses.csv')
+```
+
+#Objective
+The objective of this project is to gain further knowledge about the data science environment in the United States. 
+
+#Separate Dataset Into Their Respective Groups
+The data set includes surveys from individuals across 171 countries. This project will focus on data on individuals in the United States. As mentioned previously, the questions asked to each individual was determined by how he/she answered questions about their employment, if their job requires coding, if they are thinking of switching careers, and if they are currently learning how to code. The schema file is a csv file containing columns labeled 'Column', 'Question', and 'Asked' which corresponded to the column label in the whole data set, the question asked to the individual, and who was asked respectively. The data set was broken into these groups (learners', 'non-switcher', 'non-worker', 'worker', and 'coding worker') and only included the questions (columns) the groups were asked.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE} 
+library(plotly)
+library(stringr)
+library(sampling)
+library(wordcloud)
+#read in whole dataset
+data <- read.csv('multipleChoiceResponses.csv')
+#only focus on data from individuals in the United States
+us <- subset(data, Country == 'United States')
+us <- as.data.frame(us)
+#read in schema file
+schema <- read.csv('schema.csv')
+#separate dataframe into their respective groups and questions
+non_worker_col <- intersect(levels(schema[which(schema[,'Asked'] == 'Non-worker'),'Column']), colnames(us))
+non_worker <- subset(us, 
+                     (EmploymentStatus == 'Not employed, and not looking for work')|
+                     (EmploymentStatus == 'I prefer not to say'))[,non_worker_col]
+non_worker[,'type'] <- 'non_worker'
+
+non_switcher_col <- intersect(levels(schema[which(schema[,'Asked'] == 'Non-switcher'),'Column']), colnames(us))
+non_switcher <- subset(us, 
+                     CareerSwitcher == 'No')[,non_switcher_col]
+non_switcher[,'type'] <- 'non_switcher'
+
+worker_col <- intersect(levels(schema[which(schema[,'Asked'] == 'Worker'),'Column']), colnames(us))
+worker <- subset(us, 
+                 (EmploymentStatus == 'Employed full-time')|
+                 (EmploymentStatus == 'Employed part-time')|
+                 (EmploymentStatus == 'Independent contractor, freelancer, or self-employed')|
+                 (EmploymentStatus == 'retired'))[,worker_col]
+worker[,'type'] <- 'worker'
+
+coding_worker_col <-intersect(levels(schema[which(schema[,'Asked'] == 'CodingWorker'),'Column']), colnames(us))
+coding_worker<- subset(us, (CodeWriter == 'Yes')&
+       (EmploymentStatus == 'Employed full-time')|
+         (EmploymentStatus == 'Employed part-time')|
+         (EmploymentStatus == 'Independent contractor, freelancer, or self-employed')|
+         (EmploymentStatus == 'retired'))[,coding_worker_col]
+coding_worker[,'type'] <- 'coding_worker'
+
+learner <- intersect(levels(schema[which(schema[,'Asked'] == 'Learners'),'Column']), colnames(us))
+learner<- subset(us,(StudentStatus == 'Yes') | 
+((LearningDataScience == "Yes, I'm focused on learning mostly data science skills") |
+ (LearningDataScience == "Yes, but data science is a small part of what I'm focused on learning") ))[,learner]
+learner[,'type']<- 'learner'
+
+```
+
+# Examine the Age Distribution in Each Group
+A question that was asked to every responded was "What is your age". Below is a box plot and histogram of the age distribution for each group of people. 
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+#make list of all the dataframes
+df_list <- list(coding_worker, non_switcher, non_worker,worker, learner)
+
+#function to plot desired variable from the list of dataframe
+plot_graph <- function(df_l, var, plot_type, subplot_rows, subplot_shareX, l=0, r=0, b=0, t=0){
+  plot_list <- vector('list', length(df_l))
+  i <- 1
+  for(d in df_l){
+    p<-plot_ly(d, x = d[which(d[,var] !=''),var], type = plot_type, name = d[,'type'][1])%>%
+      layout(margin = list(l = l, r=r, b=b, t=t))
+    plot_list[[i]] <- p
+    i <- i + 1
+  }
+  subplot(plot_list, nrows = subplot_rows, shareX = subplot_shareX)
+}
+```
+
+## Age Distribution of the Groups
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+#box plot of age in each group
+plot_graph(df_list, 'Age', 'box', 6, T, 125,50,50,50)
+plot_graph(df_list, 'Age', 'histogram', 6, T, 125,50,50,50)
+
+```
+
+#Central Limit Theorem
+The central limit theorem states that the distribution of sample means, taken from independent random sample sizes, follows a normal distribution even if the original population is not normally distributed. This is important because there are a lot of statistical procedures that require normality in the data set. As a result we can apply statistical techniques that assume normality even when the population is non normal. Using the age attribute in this data set the applicability of the central limit theorem can be shown. As displayed in the box plot and histogram above, the age distribution of all groups have a positive skew. Since all these distributions follow a right skew, the coding workers will be used as an example to show the application of the central limit theorem. Below is are histograms showing the sample means of 1000 random samples of sample size 10, 20, 30, and 40 follow a normal distribution.
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+coding_worker <- coding_worker[which(coding_worker[,'Age'] != ''), ]
+plot_list <- vector('list', 4)
+c <- 1
+cat('population mean: ', mean(coding_worker[,'Age']), '\n')
+for(s in seq(10,40,10)){
+  xbar <- rep(0,1000)
+  for(i in 1:1000){
+    samp <- srswor(s, nrow(coding_worker))
+    samp <- coding_worker[,'Age'][samp != 0]
+    xbar[i] <- mean(samp)
+  }
+  p <- plot_ly(x = xbar, type = 'histogram', name = as.character(s))
+  plot_list[c] <- p
+  c <- c + 1
+  cat('sample size: ' , s, 'mean: ', mean(xbar), 'sd: ', sd(xbar), '\n')
+}
+subplot(plot_list, nrows = 2, shareX = T)
+```
+
+
+###Sampling of Coding Worker via Simple Random Sample Without Replacement, Systematic Sampling, and Stratified Sampling
+
+Sampling is a technique to select a representative portion of the population to perform a study on. There are many different sampling techniques including simple random sampling, systematic sampling, and stratified sampling. Simple random sampling is a basic sampling technique where individual subjects are selected from a larger group. In this case, every sample has the same chance of getting picked. Systematic sampling is a method where samples are selected via a fixed periodic interval. The interval is calculated by dividing the whole population sample by the desired sample size. The first sample is decided randomly within the first interval. Lastly, stratified sampling takes into the account that there is heterogeneity in a population. The population is subdivided into sub populations and the same percentage of individuals is selected from each sub population to make up the sample set. When looking at a normal distribution, the sample mean can be used as an estimate for the population mean. Given a certain confidence level, a confidence interval is defined. The confidence interval is range of values which contains the population mean with the given confidence level.
+
+For this project the coding worker population with be analyzed. Simple random sampling without replacement, systematic sampling, and stratified sampling will be utilized as sampling methods. 
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+#focus on only coding workers
+coding_worker_age <- subset(coding_worker, (Age != '') & (Age >0))
+coding_worker_age[,'sample'] <- 'All Coding Worker'
+all_coding_hist <- plot_ly(coding_worker_age, x= coding_worker_age[,'Age'],
+               type ='histogram', histnorm = 'probability', name = 'All Coding Worker')
+#33% sampling of population using simple random sampling
+N <- nrow(coding_worker_age)
+n <- ceiling(N * 0.33)
+simple <- srswor(n,N)
+simple.age <- coding_worker_age[simple != 0 , ]
+simple.age[,'sample'] <- 'SRSWOR' 
+simple.age.his <- plot_ly(simple.age, x= simple.age[,'Age'], 
+                          type ='histogram', histnorm = 'probability', 
+                          name = 'SRSWOR')
+#systematic sampling
+k <- floor(N/n)
+r<- sample(k, 1)
+rows <- seq(r, by = k, length = n)
+if(rows[n] > N){
+  rows[n] <- N
+}
+sys.sample <- coding_worker_age[rows,]
+sys.sample[ , 'sample'] <- 'systematic sampling'
+sys.sample.his <- plot_ly(sys.sample, x = sys.sample[,'Age'], 
+                          type ='histogram', histnorm = 'probability', 
+                          name = 'Systematic Sampling')
+#stratified sampling by gender and occupation title
+strat <- subset(coding_worker_age, (CurrentJobTitleSelect != '') &(GenderSelect != ''))
+strat <- strat[order(strat$CurrentJobTitleSelect,
+                     strat$GenderSelect),]
+freq <- table(strat$CurrentJobTitleSelect, strat$GenderSelect)
+st.size <- ceiling(freq * 0.33)
+st.size <- as.vector(t(st.size))
+st.size <- st.size[st.size !=0]
+strata.sample <- strata(strat, 
+       stratanames = c('CurrentJobTitleSelect', 'GenderSelect'),
+       size = st.size, method = 'srswor',
+       description = F)
+st.sample <- getdata(strat, strata.sample)
+st.sample[,'sample'] <- 'stratified sampling'
+st.hist <- plot_ly(st.sample, x = st.sample[,'Age'], type = 'histogram', 
+                   histnorm = 'probability', name = 'Stratified Sampling \n by Job Title and Gender')
+subplot(all_coding_hist,simple.age.his, sys.sample.his, st.hist, nrows = 4, shareX = T, shareY = T)
+df_list_age <- list(
+coding_worker_age,
+simple.age,
+sys.sample,
+st.sample)
+
+conf <- c(80,90)
+alpha <- 1 - (conf / 100)
+
+for(dataf in df_list_age){
+  m <- round(mean(dataf[,'Age']),2)
+  s<- round(sd(dataf[,'Age'] / sqrt(nrow(dataf))),2)
+  type <- dataf[,'sample'][1]
+  cat(str_c(type, ': ', 'mean = ', m, ' and ', 'sd = ', s, '\n'))
+  for(i in alpha){
+    str<- sprintf('%2d%% Conf Level (alpha = %.2f), CI = %.2f - %.2f', 
+                  100*(1-i), i, m - qt(1 - i/2, df = nrow(dataf)-1) * s, 
+                  m + qt(1-(i/2), df = nrow(dataf)-1) * s)
+    cat(str, '\n')
+  }
+}
+  
+
+```
+
+#General Information of Coding Worker
+Sampling is a great way to analyze a representative portion of the population without needing to evaluate the whole population. In many circumstances it is impossible to obtain data on the whole population and as a result sampling comes in very useful. Further, decreasing the number of subjects for analysis is also beneficial in that it will require less computational power. The data set used for this project can be seen as a sample of the whole coding worker population. However this sample may be skewed towards certain coding workers since the data was obtained only through the Kaggle website. Given that the data set has a manageable number of tuples the whole coding worker data set rather than a smaller sample size of the data set will be used to analyze coding workers.  
+
+The background information of the coding worker will be depicted to give some general idea of what kinds of people took this survey. Of particular interest are the following questions:  
+1. Select the option that's most similar to your current job/professional title.  
+2. Which level of formal education have you attained?  
+3. What programming language would you recommend a new data scientist learn first?  
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+#function to make pie chart for particular characterstics (columns) of given dataframe (df)
+pie_chart <- function(df, column){
+  d <- df[which(df[,column] != ''), column]
+  d<- table(d)
+  p<-plot_ly(df, labels = names(d), values = d, 
+          textposition = 'inside', textinfo = 'label+percent', type = 'pie')%>%
+    layout(title = column)
+  return(p)
+}
+
+```
+
+##Select the option that's most similar to your current job/professional title.
+There were many job titles under the umbrella of 'coding worker'. It is wise to know the distribution of the different types of professions to examine if there is a group that dominates the survey. Specifically, if there is a profession that dominates, then the answers for all the successive questions would be biased towards the mentality of that group. 
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+pie_chart(coding_worker, 'CurrentJobTitleSelect')
+```
+
+##Level of Formal Education of All Coding Worker?
+Many people are applying for jobs everyday. It would be ideal to interview every applicant to increase your chances of getting the best applicant, however this approach is not feasible.Scanning resumes for keywords that pertains to the job at hand is a good way of shifting out those who may not have the technical expertise for the position. After passing the first step of screening, what distinguishes one applicant from another? Does having more degrees further boost your chances of getting a job? Although examining the educational background of these professionals may only show a correlative relationship between degrees and certain jobs, it is still interesting to see what the educational background of these professionals are.
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+pie_chart(coding_worker,'FormalEducation')
+
+```
+
+###Formal Education and Specified Profession 
+The above pie chart shows the formal education of all the coding workers. However, it is more informative to show the formal education distribution of each profession. Alternatively, it is also interesting to examine the profession of individuals with a certain formal education. 
+
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+h <- function(df, column1, column2, width, height, xlegend, ylegend){
+  p <- plot_ly()
+  for(v in unique(df[,column1])){
+    vari <- df[which(df[, column2] != ''),] 
+    vari <- vari[which(vari[,column2]!=''),]
+    vari <- vari[which(vari[,column1] == v), column2]
+    p<-add_histogram(p, x = vari, histnorm = 'probability', name = v, type ='histogram')%>%
+      layout(autosize = F,width = width, height = height,
+             barmode = 'stack', title = column2, margin = list(b=150, r = 50, l = 20), 
+             legend = list(x = xlegend, y = ylegend, font = list(size = 9), orientation = 'h'))
+  }
+  return(p)
+}
+h(coding_worker,'FormalEducation', 'CurrentJobTitleSelect', 1000, 500, 1000, 500)
+h(coding_worker, 'CurrentJobTitleSelect','FormalEducation', 1000, 500, 1000, 500)
+```
+
+#A Little Peek at Data Scientist's Job Description
+Data Science was deemed the 'sexist job of the 21 century' in the Harvard Business Review in 2012. It is a fairly new and evolving field and this survey provides some information about the new trends and 'need to knows' in the data science field. Some questions of interest include :  
+1. What language do they recommend new data scientists to learn?  
+2. Are there any learning platforms they found useful for their career?  
+3. What sort of tools and algorithms do they use in their job?  
+4. What are some important skills that a Data Scientist should have?
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+data_science <- subset(coding_worker , CurrentJobTitleSelect == 'Data Scientist')
+```
+
+
+## What Language do Current Data Scientist Recommend New Data Scientist to Learn?
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+#function to make pie chart for particular characterstics (columns) of given dataframe (df)
+pie_chart <- function(df, column){
+  d <- df[which(df[,column] != ''), column]
+  d<- table(d)
+  p<-plot_ly(df, labels = names(d), values = d, 
+          textposition = 'inside', textinfo = 'label+percent', type = 'pie')%>%
+    layout(title = column)
+  return(p)
+}
+
+pie_chart(data_science,'LanguageRecommendationSelect')
+```
+
+### Results: Python > R
+Interestingly the majority of data scientists suggest learning Python over R. There can be many reasons that could explain this large gap between Python and R. First, maybe the python language is truly the predominate language to know in the data science field. Alternatively, there can be a sample size bias. This survey is taken by Kaggle which MAY be largely visited by data scientist who use python as their main or only language. As a result the results are skewed towards individuals who use python.
+
+##Whats the Best Way of Obtaining "Data Science" Skills? 
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+#Isolate the type of questions asked (topic) by particular group (df)
+subset_df <- function(df, topic){
+  sub_df <- df[,str_detect(colnames(df), str_c('^', topic))]
+  colnames(sub_df)<- lapply(colnames(sub_df), 
+                            function(x) str_sub(x, nchar(topic) + 1, nchar(x)))
+  sub_df[,'type']<- df[,'type']
+  return(sub_df)
+}
+
+#function to plot histogram of answers from isolated dataframe
+make_histogram <- function(df, normtype, l = 50, r= 50, b = 50, t = 50){
+  p <- plot_ly()
+  for(column in colnames(df)[1:(ncol(df)-1)]){
+    p <-add_trace(p, x = df[which(df[,column] != ''),column] , 
+                  histnorm = normtype, type = 'histogram', name = column)%>%
+      layout(margin = list(l = l, r = r, b = b, t = t))
+    
+  }
+  return(p)
+}
+
+#LearningPlatformUsefulness
+LearningPlatformUsefulness <- subset_df(data_science, 'LearningPlatformUsefulness')
+make_histogram(LearningPlatformUsefulness, 'probability', b = 20, t = 0)
+
+```
+
+### Is doing Projects the way to go?
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+projects <- plot_ly()
+for(df in df_list){
+  x <- df[which(df[,'LearningPlatformUsefulnessProjects'] != ''), 'LearningPlatformUsefulnessProjects']
+  projects<- add_trace(projects, x = x, type = 'histogram',
+                       name = df[,'type'], histnorm = 'probability')
+}
+projects
+```
+
+
+##What Sort of Tools and Algorithms do Data Scientists Use in their Job? 
+A very simplified description of a data science role includes the collection, analysis, and interpretation of copious amounts of data. Many data scientist utilize different tools and algorithms to analyze and interpret their gathered data. Below shows the likelihood at which some common algorithms and tools are used by data scientist.   
+
+###Algorithms
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+WorkMethodsFrequency <- subset_df(data_science, 'WorkMethodsFrequency')
+make_histogram(WorkMethodsFrequency, 'probability')
+
+```
+
+### Tools
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+WorkToolsFrequency <- subset_df(data_science, 'WorkToolsFrequency')
+make_histogram(WorkToolsFrequency, 'probability')
+```
+
+##What are Some Important Skills that a Data Scientist Should Have?
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+JobSkillImportance <-subset_df(data_science, 'JobSkillImportance')
+make_histogram(JobSkillImportance, 'probability')
+```
+
+### Observations
+100 percent of data scientist who answered these questions said 'BigData', SQL, and visualization is something a data scientist must know. However, this data seems to be contradictory of what we have seen so far. Showing percentage data can be very deceiving. The question is how many people are answering these questions? Below is a histogram showing the number of people who actually answered the job skill questions.
+
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+make_histogram(JobSkillImportance, 'frequency')
+```
+
+As shown from the histogram above less than 5 people out of over 700 data scientist answered these questions. It is not surprising that many people did not answer all the questions, especially given that there were over 200 questions in the question bank. The n for this data set is too low to make any real conclusions. 
+
+#Conclusion
+
+Below is a word cloud depicting the importance of a word based on how frequently it was selected as used "most of the time" or is "very useful". As you can see words like python, data visualization, R, SQL, and projects are emphasized in this word cloud. 
+```{r warning=FALSE, message=FALSE, echo = FALSE}
+make_matrix <- function(df, words){
+  m <- matrix(nrow = ncol(df) -1, ncol = 2)
+  colnames(m) <- c('word', 'freq')
+  for(i in 1:(ncol(df) -1)){
+    m[i,'word'] <- colnames(df)[i]
+    m[i, 'freq'] <- length(which(df[,i] == words))
+  }
+  return(m)
+}
+
+learning <- make_matrix(LearningPlatformUsefulness, 'Very useful')
+method <- make_matrix(WorkMethodsFrequency, 'Most of the time')
+tools <- make_matrix(WorkToolsFrequency, 'Most of the time')
+lr <- as.matrix(table(data_science['LanguageRecommendationSelect']))
+language <- matrix(nrow = nrow(lr), ncol = 2)
+language[,1]<- rownames(lr)
+language[,2] <- lr[,1]
+colnames(language) <- c('word', 'freq')
+df <- rbind(learning, method, tools, language)
+df <- as.data.frame(df)
+df[,'freq'] <- as.numeric(as.character(df$freq))
+df <- aggregate(df[,'freq'], by = list(df[,'word']), sum)
+wordcloud(df[,1], df[,2])
+
+```
+
+
